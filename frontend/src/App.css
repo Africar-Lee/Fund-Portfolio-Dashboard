@@ -1,0 +1,28 @@
+.dashboard {
+  width: min(100% - 40px, 960px);
+  margin: 56px auto;
+}
+
+.eyebrow { color: #356554; font-size: 0.9rem; font-weight: 650; }
+h1 { margin-bottom: 12px; font-size: clamp(2rem, 5vw, 3rem); letter-spacing: -0.04em; }
+header > p:last-child { color: #5b6c72; line-height: 1.6; }
+
+.summary, .sample {
+  margin-top: 28px;
+  padding: 28px;
+  border: 1px solid #dce4df;
+  border-radius: 12px;
+  background: #fff;
+}
+
+.summary strong { display: block; margin: 8px 0; font-size: 3rem; }
+.summary span, dt { color: #5b6c72; }
+
+dl {
+  display: grid;
+  grid-template-columns: minmax(80px, 120px) minmax(0, 1fr);
+  gap: 14px;
+  margin-bottom: 0;
+}
+
+dd { margin: 0; overflow-wrap: anywhere; }
