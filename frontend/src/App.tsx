@@ -1,32 +1,100 @@
-import { resourceSnapshots } from "./data/resourceSnapshots";
+import type { ResourceSnapshot } from "./data/resourceSnapshots";
+import { isResourceSnapshot } from "./isResourceSnapshot";
 import ResourceTable from "./resourceTable";
 import "./App.css";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 function App() {
   const pageTitle = "Fund Portfolio Dashboard";
-  const sample = resourceSnapshots[1];
+
+  const [apiTotal, setApiTotal] = useState<number | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [visibleSnapshots, setVisibleSnapshots] = useState<ResourceSnapshot[]>(
+    [],
+  );
 
   const [selectedType, setSelectedType] = useState("all");
-  const filteredSnapshots = resourceSnapshots.filter(
-    (snapshot) =>
-      selectedType === "all" || snapshot.resource_type === selectedType,
-  );
-
   const [sortDirec, setSortDirec] = useState("desc");
-
-  const sortedSnapshots = [...filteredSnapshots].sort((fst, snd) =>
-    sortDirec === "desc"
-      ? snd.utilization_pct - fst.utilization_pct
-      : fst.utilization_pct - snd.utilization_pct,
-  );
-
   const [curPage, setCurPage] = useState(1);
-  const pageSize = 10;
-  const pageCount = Math.max(1, Math.ceil(sortedSnapshots.length / pageSize));
-  const startIdx = (curPage - 1) * pageSize;
 
-  const visibleSnapshots = sortedSnapshots.slice(startIdx, startIdx + pageSize);
+  const pageSize = 10;
+  const pageCount = Math.max(1, Math.ceil((apiTotal ?? 0) / pageSize));
+  const sample = visibleSnapshots[0];
+
+  useEffect(() => {
+    let active = true;
+
+    async function loadPositions() {
+      setApiTotal(null);
+      setLoadError(null);
+      setVisibleSnapshots([]);
+      const params = new URLSearchParams({
+        page: String(curPage),
+        page_size: String(pageSize),
+        sort_order: sortDirec,
+      });
+
+      if (selectedType !== "all") {
+        params.set("resource_type", selectedType);
+      }
+
+      const response = await fetch(
+        `http://127.0.0.1:8000/positions?${params}`,
+      ).catch((error: unknown) => {
+        if (!(error instanceof TypeError)) throw error;
+        if (active)
+          setLoadError(
+            "Could not connect to the API. Check the backend service.",
+          );
+        return null;
+      });
+
+      if (!active || response === null) return;
+
+      if (!response.ok) {
+        setLoadError(`Could not load records. HTTP status: ${response.status}`);
+        return;
+      }
+
+      const data: unknown = await response.json().catch((error: unknown) => {
+        if (!(error instanceof SyntaxError || error instanceof TypeError)) {
+          throw error;
+        }
+        if (active) {
+          setLoadError("Could not read the API response.");
+        }
+        return undefined;
+      });
+
+      if (!active || data === undefined) return;
+
+      if (
+        typeof data !== "object" ||
+        data === null ||
+        !("total" in data) ||
+        typeof data.total !== "number" ||
+        !Number.isSafeInteger(data.total) ||
+        data.total < 0 ||
+        !("items" in data) ||
+        !Array.isArray(data.items) ||
+        !data.items.every(isResourceSnapshot) ||
+        data.items.length > pageSize ||
+        data.items.length > data.total
+      ) {
+        setLoadError("The API returned invalid snapshot data.");
+        return;
+      }
+
+      setApiTotal(data.total);
+      setVisibleSnapshots(data.items);
+    }
+
+    void loadPositions();
+
+    return () => {
+      active = false;
+    };
+  }, [selectedType, curPage, pageSize, sortDirec]);
 
   return (
     <main className="dashboard">
@@ -39,8 +107,11 @@ function App() {
       </header>
 
       <section className="summary" aria-label="Dataset summary">
-        <p>Loaded snapshots</p>
-        <strong>{resourceSnapshots.length}</strong>
+        <p>Matching snapshots</p>
+        <strong>
+          {apiTotal ?? (loadError ? "Unavailable" : "Loading...")}
+        </strong>
+        {loadError && <p role="alert">{loadError}</p>}
         <span>Demo data · CPU, GPU and storage resources</span>
       </section>
 
@@ -64,13 +135,17 @@ function App() {
         <select
           id="sort-direction"
           value={sortDirec}
-          onChange={(event) => setSortDirec(event.target.value)}
+          onChange={(event) => {
+            setSortDirec(event.target.value);
+            setCurPage(1);
+          }}
         >
           <option value="desc">Desc</option>
           <option value="asc">Asc</option>
         </select>
 
-        <p>Total records: {sortedSnapshots.length}</p>
+        <p>Total records: {apiTotal ?? "—"}</p>
+        {apiTotal === 0 && <p>No matching snapshots.</p>}
 
         <div className="table-container">
           <ResourceTable snapshots={visibleSnapshots} />
@@ -78,16 +153,22 @@ function App() {
 
         <div>
           <button
-            disabled={curPage === 1}
+            disabled={apiTotal === null || curPage <= 1}
             onClick={() => setCurPage(curPage - 1)}
           >
             Previous
           </button>
+
           <span>
-            Page {curPage} of {pageCount}
+            {apiTotal === null
+              ? loadError
+                ? "Unavailable"
+                : "Loading..."
+              : `Page ${curPage} of ${pageCount}`}
           </span>
+
           <button
-            disabled={curPage === pageCount}
+            disabled={apiTotal === null || curPage >= pageCount}
             onClick={() => setCurPage(curPage + 1)}
           >
             Next
@@ -95,23 +176,25 @@ function App() {
         </div>
       </section>
 
-      <section className="sample" aria-labelledby="sample-heading">
-        <h2 id="sample-heading">Sample record</h2>
-        <dl>
-          <dt>Portfolio</dt>
-          <dd>{sample.portfolio_name}</dd>
-          <dt>Resource</dt>
-          <dd>{sample.resource_key}</dd>
-          <dt>Type</dt>
-          <dd>{sample.resource_type}</dd>
-          <dt>Quantity</dt>
-          <dd>{sample.quantity}</dd>
-          <dt>Utilization</dt>
-          <dd>{sample.utilization_pct}%</dd>
-          <dt>Observed at</dt>
-          <dd>{sample.observed_at}</dd>
-        </dl>
-      </section>
+      {sample && (
+        <section className="sample" aria-labelledby="sample-heading">
+          <h2 id="sample-heading">Sample record</h2>
+          <dl>
+            <dt>Portfolio</dt>
+            <dd>{sample.portfolio_name}</dd>
+            <dt>Resource</dt>
+            <dd>{sample.resource_key}</dd>
+            <dt>Type</dt>
+            <dd>{sample.resource_type}</dd>
+            <dt>Quantity</dt>
+            <dd>{sample.quantity}</dd>
+            <dt>Utilization</dt>
+            <dd>{sample.utilization_pct}%</dd>
+            <dt>Observed at</dt>
+            <dd>{sample.observed_at}</dd>
+          </dl>
+        </section>
+      )}
     </main>
   );
 }
